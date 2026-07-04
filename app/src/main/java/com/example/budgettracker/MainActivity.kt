@@ -1,5 +1,6 @@
 package com.example.budgettracker
 
+import android.app.DatePickerDialog
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -7,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,13 +25,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModelProvider
+import com.example.budgettracker.data.Transaction
 import com.example.budgettracker.data.TransactionType
 import com.example.budgettracker.ui.theme.*
 import com.example.budgettracker.viewmodel.BudgetViewModel
@@ -40,6 +43,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var viewModel: BudgetViewModel
     private lateinit var createCsvLauncher: ActivityResultLauncher<String>
     private lateinit var createPdfLauncher: ActivityResultLauncher<String>
+    private var filteredListToExport: List<Transaction> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,11 +52,11 @@ class MainActivity : ComponentActivity() {
         viewModel = ViewModelProvider(this)[BudgetViewModel::class.java]
         
         createCsvLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-            uri?.let { viewModel.exportToCsv(contentResolver, it) }
+            uri?.let { viewModel.exportToCsv(contentResolver, it, filteredListToExport) }
         }
         
         createPdfLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-            uri?.let { viewModel.exportToPdf(contentResolver, it) }
+            uri?.let { viewModel.exportToPdf(contentResolver, it, filteredListToExport) }
         }
 
         setContent {
@@ -81,7 +85,8 @@ class MainActivity : ComponentActivity() {
                         buttonText = "Download Excel",
                         buttonColor = MaterialTheme.colorScheme.primary,
                         onDismiss = { showExportExcelDialog = false },
-                        onDownload = {
+                        onDownload = { start, end ->
+                            filteredListToExport = viewModel.getFilteredTransactions(start, end)
                             createCsvLauncher.launch("budget_tracker_${System.currentTimeMillis()}.csv")
                             showExportExcelDialog = false
                         }
@@ -95,7 +100,8 @@ class MainActivity : ComponentActivity() {
                         buttonText = "Download PDF",
                         buttonColor = Color(0xFFB13B2E),
                         onDismiss = { showExportPdfDialog = false },
-                        onDownload = {
+                        onDownload = { start, end ->
+                            filteredListToExport = viewModel.getFilteredTransactions(start, end)
                             createPdfLauncher.launch("budget_tracker_${System.currentTimeMillis()}.pdf")
                             showExportPdfDialog = false
                         }
@@ -114,10 +120,22 @@ fun ExportDialog(
     buttonText: String,
     buttonColor: Color,
     onDismiss: () -> Unit,
-    onDownload: () -> Unit
+    onDownload: (String, String) -> Unit
 ) {
-    var startDate by remember { mutableStateOf("mm/dd/yyyy") }
-    var endDate by remember { mutableStateOf("mm/dd/yyyy") }
+    val context = LocalContext.current
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val calendar = Calendar.getInstance()
+    
+    var startDate by remember { mutableStateOf(sdf.format(Date())) }
+    var endDate by remember { mutableStateOf(sdf.format(Date())) }
+
+    fun showDatePicker(onDateSelected: (String) -> Unit) {
+        DatePickerDialog(context, { _, year, month, day ->
+            val selected = Calendar.getInstance()
+            selected.set(year, month, day)
+            onDateSelected(sdf.format(selected.time))
+        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -129,7 +147,7 @@ fun ExportDialog(
             Column(modifier = Modifier.padding(8.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column {
-                        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.Black)
                         Text(
                             "Select the date range to include in the report.",
                             fontSize = 12.sp,
@@ -148,9 +166,12 @@ fun ExportDialog(
                         OutlinedTextField(
                             value = startDate,
                             onValueChange = { startDate = it },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().clickable { showDatePicker { startDate = it } },
                             colors = customTextFieldColors(),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            enabled = false,
+                            readOnly = true,
+                            textStyle = LocalTextStyle.current.copy(color = Color.Black)
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
@@ -159,9 +180,12 @@ fun ExportDialog(
                         OutlinedTextField(
                             value = endDate,
                             onValueChange = { endDate = it },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().clickable { showDatePicker { endDate = it } },
                             colors = customTextFieldColors(),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            enabled = false,
+                            readOnly = true,
+                            textStyle = LocalTextStyle.current.copy(color = Color.Black)
                         )
                     }
                 }
@@ -176,7 +200,34 @@ fun ExportDialog(
                 ) {
                     filterButtons.forEach { label ->
                         Surface(
-                            onClick = { /* Handle filter */ },
+                            onClick = { 
+                                val cal = Calendar.getInstance()
+                                when (label) {
+                                    "This Month" -> {
+                                        cal.set(Calendar.DAY_OF_MONTH, 1)
+                                        startDate = sdf.format(cal.time)
+                                        cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
+                                        endDate = sdf.format(cal.time)
+                                    }
+                                    "Last Month" -> {
+                                        cal.add(Calendar.MONTH, -1)
+                                        cal.set(Calendar.DAY_OF_MONTH, 1)
+                                        startDate = sdf.format(cal.time)
+                                        cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
+                                        endDate = sdf.format(cal.time)
+                                    }
+                                    "This Year" -> {
+                                        cal.set(Calendar.DAY_OF_YEAR, 1)
+                                        startDate = sdf.format(cal.time)
+                                        cal.set(Calendar.DAY_OF_YEAR, cal.getActualMaximum(Calendar.DAY_OF_YEAR))
+                                        endDate = sdf.format(cal.time)
+                                    }
+                                    "All Time" -> {
+                                        startDate = "2000-01-01"
+                                        endDate = sdf.format(Date())
+                                    }
+                                }
+                            },
                             color = Color(0xFFF5EFE7),
                             shape = RoundedCornerShape(8.dp)
                         ) {
@@ -184,7 +235,8 @@ fun ExportDialog(
                                 label,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Medium,
+                                color = Color.Black
                             )
                         }
                     }
@@ -198,11 +250,11 @@ fun ExportDialog(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = onDownload,
+                        onClick = { onDownload(startDate, endDate) },
                         colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(buttonText, fontWeight = FontWeight.Bold)
+                        Text(buttonText, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }
@@ -216,7 +268,6 @@ fun OnboardingScreen(onGetStarted: (Double) -> Unit) {
     
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column {
-            // Header Image Placeholder
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -259,7 +310,7 @@ fun OnboardingScreen(onGetStarted: (Double) -> Unit) {
                         "Set Starting Balance",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = Color.Black
                     )
                     Text(
                         "Enter how much money you currently have.",
@@ -289,7 +340,9 @@ fun OnboardingScreen(onGetStarted: (Double) -> Unit) {
                             focusedContainerColor = MaterialTheme.colorScheme.secondary,
                             unfocusedContainerColor = MaterialTheme.colorScheme.secondary,
                             focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedTextColor = Color.Black,
+                            unfocusedTextColor = Color.Black
                         ),
                         shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
@@ -306,8 +359,8 @@ fun OnboardingScreen(onGetStarted: (Double) -> Unit) {
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Get Started", fontWeight = FontWeight.Bold)
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.padding(start = 8.dp))
+                            Text("Get Started", fontWeight = FontWeight.Bold, color = Color.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.padding(start = 8.dp), tint = Color.White)
                         }
                     }
                     
@@ -378,7 +431,8 @@ fun BudgetApp(
                     "Recent Transactions",
                     modifier = Modifier.padding(16.dp),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    fontSize = 18.sp,
+                    color = Color.Black
                 )
             }
             
@@ -450,7 +504,7 @@ fun BudgetHeader(
                                 .background(Color.Green, RoundedCornerShape(4.dp))
                         )
                         Text(
-                            " ₱${String.format("%.2f", currentBalance)} ",
+                            " ₱${String.format(Locale.getDefault(), "%.2f", currentBalance)} ",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
@@ -551,8 +605,8 @@ fun SummaryCard(
             Text(label, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "₱${String.format("%.1fk", value / 1000)}",
-                fontSize = 16.sp,
+                "₱${String.format(Locale.getDefault(), "%.2f", value)}",
+                fontSize = 14.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = color
             )
@@ -573,7 +627,7 @@ fun ExpensesVsIncomeSection(income: Double, expenses: Double) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Expenses vs Income", fontWeight = FontWeight.Bold)
+                Text("Expenses vs Income", fontWeight = FontWeight.Bold, color = Color.Black)
                 val percentSpent = if (income > 0) (expenses / income * 100).toInt() else 0
                 Text("$percentSpent% spent", fontSize = 12.sp, color = Color.Gray)
             }
@@ -593,8 +647,8 @@ fun ExpensesVsIncomeSection(income: Double, expenses: Double) {
             Spacer(modifier = Modifier.height(12.dp))
             
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("+₱${String.format("%.2f", income)} income", color = IncomeGreen, fontSize = 12.sp)
-                Text("-₱${String.format("%.2f", expenses)} expenses", color = ExpenseRed, fontSize = 12.sp)
+                Text("+₱${String.format(Locale.getDefault(), "%.2f", income)} income", color = IncomeGreen, fontSize = 12.sp)
+                Text("-₱${String.format(Locale.getDefault(), "%.2f", expenses)} expenses", color = ExpenseRed, fontSize = 12.sp)
             }
         }
     }
@@ -677,18 +731,27 @@ fun TabButton(text: String, isSelected: Boolean, onClick: () -> Unit, modifier: 
 
 @Composable
 fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, TransactionType) -> Unit) {
+    val context = LocalContext.current
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val calendar = Calendar.getInstance()
+    
     var name by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
-    var date by remember { 
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        mutableStateOf(sdf.format(Date())) 
-    }
+    var date by remember { mutableStateOf(sdf.format(Date())) }
     var note by remember { mutableStateOf("") }
+    
+    fun showDatePicker() {
+        DatePickerDialog(context, { _, year, month, day ->
+            val selected = Calendar.getInstance()
+            selected.set(year, month, day)
+            date = sdf.format(selected.time)
+        }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+    }
     
     val accentColor = if (type == TransactionType.EXPENSE) Color(0xFFB13B2E) else Color(0xFF4A7C59)
     
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("Add ${if (type == TransactionType.EXPENSE) "Expense" else "Income"}", fontWeight = FontWeight.Bold)
+        Text("Add ${if (type == TransactionType.EXPENSE) "Expense" else "Income"}", fontWeight = FontWeight.Bold, color = Color.Black)
         
         Spacer(modifier = Modifier.height(16.dp))
         
@@ -699,7 +762,8 @@ fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, Tra
             placeholder = { Text("e.g. Groceries, Electric bill...") },
             modifier = Modifier.fillMaxWidth(),
             colors = customTextFieldColors(),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(12.dp),
+            textStyle = LocalTextStyle.current.copy(color = Color.Black)
         )
         
         Spacer(modifier = Modifier.height(12.dp))
@@ -715,7 +779,8 @@ fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, Tra
                     modifier = Modifier.fillMaxWidth(),
                     colors = customTextFieldColors(),
                     shape = RoundedCornerShape(12.dp),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    textStyle = LocalTextStyle.current.copy(color = Color.Black)
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
@@ -724,9 +789,12 @@ fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, Tra
                 OutlinedTextField(
                     value = date,
                     onValueChange = { date = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().clickable { showDatePicker() },
                     colors = customTextFieldColors(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = false,
+                    readOnly = true,
+                    textStyle = LocalTextStyle.current.copy(color = Color.Black)
                 )
             }
         }
@@ -740,7 +808,8 @@ fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, Tra
             placeholder = { Text("Additional details...") },
             modifier = Modifier.fillMaxWidth(),
             colors = customTextFieldColors(),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(12.dp),
+            textStyle = LocalTextStyle.current.copy(color = Color.Black)
         )
         
         Spacer(modifier = Modifier.height(24.dp))
@@ -761,7 +830,7 @@ fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, Tra
             colors = ButtonDefaults.buttonColors(containerColor = accentColor),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text("Add ${if (type == TransactionType.EXPENSE) "Expense" else "Income"}", fontWeight = FontWeight.Bold)
+            Text("Add ${if (type == TransactionType.EXPENSE) "Expense" else "Income"}", fontWeight = FontWeight.Bold, color = Color.White)
         }
     }
 }
@@ -782,7 +851,10 @@ fun customTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = Color(0xFFF5EFE7),
     unfocusedContainerColor = Color(0xFFF5EFE7),
     focusedBorderColor = Color.Transparent,
-    unfocusedBorderColor = Color.Transparent
+    unfocusedBorderColor = Color.Transparent,
+    disabledContainerColor = Color(0xFFF5EFE7),
+    disabledBorderColor = Color.Transparent,
+    disabledTextColor = Color.Black
 )
 
 @Composable
@@ -819,12 +891,12 @@ fun TransactionItem(transaction: com.example.budgettracker.data.Transaction) {
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
-                    Text(transaction.name, fontWeight = FontWeight.Bold)
+                    Text(transaction.name, fontWeight = FontWeight.Bold, color = Color.Black)
                     Text(transaction.date, fontSize = 12.sp, color = Color.Gray)
                 }
             }
             Text(
-                text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}₱${String.format("%.2f", transaction.amount)}",
+                text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}₱${String.format(Locale.getDefault(), "%.2f", transaction.amount)}",
                 color = if (transaction.type == TransactionType.INCOME) IncomeGreen else ExpenseRed,
                 fontWeight = FontWeight.Bold
             )

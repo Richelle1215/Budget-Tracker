@@ -1,22 +1,30 @@
 package com.example.budgettracker.viewmodel
 
+import android.app.Application
 import android.content.ContentResolver
+import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import com.example.budgettracker.data.Transaction
 import com.example.budgettracker.data.TransactionType
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import java.text.SimpleDateFormat
 import java.util.*
 
-class BudgetViewModel : ViewModel() {
+class BudgetViewModel(application: Application) : AndroidViewModel(application) {
+    private val prefs = application.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
+    private val gson = Gson()
+    private val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
     var initialBalance = mutableStateOf(0.0)
     val transactions = mutableStateListOf<Transaction>()
+    var lastResetDate = mutableStateOf("")
 
     val totalIncome: Double
         get() = transactions.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
@@ -27,16 +35,49 @@ class BudgetViewModel : ViewModel() {
     val currentBalance: Double
         get() = initialBalance.value + totalIncome - totalExpenses
 
+    init {
+        loadData()
+    }
+
+    private fun loadData() {
+        initialBalance.value = prefs.getFloat("initial_balance", 0.0f).toDouble()
+        lastResetDate.value = prefs.getString("last_reset_date", "") ?: ""
+        
+        val transactionsJson = prefs.getString("transactions", null)
+        if (transactionsJson != null) {
+            val type = object : TypeToken<List<Transaction>>() {}.type
+            val list: List<Transaction> = gson.fromJson(transactionsJson, type)
+            transactions.clear()
+            transactions.addAll(list)
+        }
+    }
+
+    private fun saveData() {
+        prefs.edit().apply {
+            putFloat("initial_balance", initialBalance.value.toFloat())
+            putString("last_reset_date", lastResetDate.value)
+            putString("transactions", gson.toJson(transactions.toList()))
+            apply()
+        }
+    }
+
+    fun isNewDay(): Boolean {
+        val today = sdf.format(Date())
+        return lastResetDate.value != today
+    }
+
     fun addTransaction(name: String, amount: Double, date: String, type: TransactionType) {
         transactions.add(Transaction(name = name, amount = amount, date = date, type = type))
+        saveData()
     }
 
     fun setInitialBalance(balance: Double) {
         initialBalance.value = balance
+        lastResetDate.value = sdf.format(Date())
+        saveData()
     }
 
     fun getFilteredTransactions(startDateStr: String, endDateStr: String): List<Transaction> {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         return try {
             val startDate = sdf.parse(startDateStr)
             val endDate = sdf.parse(endDateStr)
@@ -74,14 +115,14 @@ class BudgetViewModel : ViewModel() {
         y += 40f
         paint.textSize = 14f
         paint.isFakeBoldText = false
-        canvas.drawText("Initial Balance: ₱${String.format("%.2f", initialBalance.value)}", 50f, y, paint)
+        canvas.drawText("Initial Balance: ₱${String.format(Locale.getDefault(), "%.2f", initialBalance.value)}", 50f, y, paint)
         y += 25f
-        canvas.drawText("Total Income: ₱${String.format("%.2f", totalIncome)}", 50f, y, paint)
+        canvas.drawText("Total Income: ₱${String.format(Locale.getDefault(), "%.2f", totalIncome)}", 50f, y, paint)
         y += 25f
-        canvas.drawText("Total Expenses: ₱${String.format("%.2f", totalExpenses)}", 50f, y, paint)
+        canvas.drawText("Total Expenses: ₱${String.format(Locale.getDefault(), "%.2f", totalExpenses)}", 50f, y, paint)
         y += 25f
         paint.isFakeBoldText = true
-        canvas.drawText("Current Balance: ₱${String.format("%.2f", currentBalance)}", 50f, y, paint)
+        canvas.drawText("Current Balance: ₱${String.format(Locale.getDefault(), "%.2f", currentBalance)}", 50f, y, paint)
         
         y += 40f
         paint.textSize = 16f
@@ -91,7 +132,6 @@ class BudgetViewModel : ViewModel() {
         paint.textSize = 12f
         paint.isFakeBoldText = false
         
-        // Draw Table Header
         paint.isFakeBoldText = true
         canvas.drawText("Date", 50f, y, paint)
         canvas.drawText("Name", 150f, y, paint)
@@ -102,13 +142,12 @@ class BudgetViewModel : ViewModel() {
         
         filteredList.forEach {
             if (y > 800) { 
-                // In a production app, we would handle multiple pages here
                 return@forEach 
             }
             canvas.drawText(it.date, 50f, y, paint)
             canvas.drawText(it.name, 150f, y, paint)
             canvas.drawText(it.type.name, 350f, y, paint)
-            canvas.drawText("₱${String.format("%.2f", it.amount)}", 450f, y, paint)
+            canvas.drawText("₱${String.format(Locale.getDefault(), "%.2f", it.amount)}", 450f, y, paint)
             y += 20f
         }
 

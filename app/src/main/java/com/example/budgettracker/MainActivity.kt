@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BudgetTrackerTheme {
-                var showOnboarding by remember { mutableStateOf(viewModel.initialBalance.value == 0.0 && viewModel.transactions.isEmpty()) }
+                var showOnboarding by remember { mutableStateOf(viewModel.isNewDay()) }
                 var showExportExcelDialog by remember { mutableStateOf(false) }
                 var showExportPdfDialog by remember { mutableStateOf(false) }
 

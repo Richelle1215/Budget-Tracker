@@ -20,7 +20,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModelProvider
-
 import com.example.budgettracker.data.TransactionType
 import com.example.budgettracker.ui.theme.BudgetTrackerTheme
 import com.example.budgettracker.viewmodel.BudgetViewModel

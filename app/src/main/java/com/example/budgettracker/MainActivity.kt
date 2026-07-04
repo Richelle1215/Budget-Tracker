@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
@@ -421,8 +422,8 @@ fun BudgetApp(
             }
             
             item {
-                TransactionForm(onAddTransaction = { name, amount, date, type ->
-                    viewModel.addTransaction(name, amount, date, type)
+                TransactionForm(onAddTransaction = { name, amount, date, type, note ->
+                    viewModel.addTransaction(name, amount, date, type, note)
                 })
             }
             
@@ -437,7 +438,10 @@ fun BudgetApp(
             }
             
             items(viewModel.transactions.reversed()) { transaction ->
-                TransactionItem(transaction = transaction)
+                TransactionItem(
+                    transaction = transaction,
+                    onDelete = { viewModel.deleteTransaction(transaction) }
+                )
             }
             
             item {
@@ -655,7 +659,7 @@ fun ExpensesVsIncomeSection(income: Double, expenses: Double) {
 }
 
 @Composable
-fun TransactionForm(onAddTransaction: (String, Double, String, TransactionType) -> Unit) {
+fun TransactionForm(onAddTransaction: (String, Double, String, TransactionType, String) -> Unit) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Expense, 1: Income
     
     Card(
@@ -730,7 +734,7 @@ fun TabButton(text: String, isSelected: Boolean, onClick: () -> Unit, modifier: 
 }
 
 @Composable
-fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, TransactionType) -> Unit) {
+fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, TransactionType, String) -> Unit) {
     val context = LocalContext.current
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     val calendar = Calendar.getInstance()
@@ -818,7 +822,7 @@ fun TransactionInputs(type: TransactionType, onAdd: (String, Double, String, Tra
             onClick = {
                 val amt = amount.toDoubleOrNull() ?: 0.0
                 if (name.isNotBlank() && amt > 0) {
-                    onAdd(name, amt, date, type)
+                    onAdd(name, amt, date, type, note)
                     name = ""
                     amount = ""
                     note = ""
@@ -858,7 +862,7 @@ fun customTextFieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
-fun TransactionItem(transaction: com.example.budgettracker.data.Transaction) {
+fun TransactionItem(transaction: com.example.budgettracker.data.Transaction, onDelete: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -874,7 +878,7 @@ fun TransactionItem(transaction: com.example.budgettracker.data.Transaction) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
@@ -892,14 +896,28 @@ fun TransactionItem(transaction: com.example.budgettracker.data.Transaction) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(transaction.name, fontWeight = FontWeight.Bold, color = Color.Black)
-                    Text(transaction.date, fontSize = 12.sp, color = Color.Gray)
+                    Text("${transaction.date} • ${transaction.time}", fontSize = 12.sp, color = Color.Gray)
+                    if (transaction.note.isNotBlank()) {
+                        Text(transaction.note, fontSize = 11.sp, color = Color.DarkGray)
+                    }
                 }
             }
-            Text(
-                text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}₱${String.format(Locale.getDefault(), "%.2f", transaction.amount)}",
-                color = if (transaction.type == TransactionType.INCOME) IncomeGreen else ExpenseRed,
-                fontWeight = FontWeight.Bold
-            )
+            
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}₱${String.format(Locale.getDefault(), "%.2f", transaction.amount)}",
+                    color = if (transaction.type == TransactionType.INCOME) IncomeGreen else ExpenseRed,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = Color.LightGray,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }

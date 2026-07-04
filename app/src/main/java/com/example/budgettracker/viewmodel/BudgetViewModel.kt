@@ -21,6 +21,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     private val prefs = application.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
     private val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private val stf = SimpleDateFormat("hh:mm a", Locale.getDefault())
 
     var initialBalance = mutableStateOf(0.0)
     val transactions = mutableStateListOf<Transaction>()
@@ -66,8 +67,14 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         return lastResetDate.value != today
     }
 
-    fun addTransaction(name: String, amount: Double, date: String, type: TransactionType) {
-        transactions.add(Transaction(name = name, amount = amount, date = date, type = type))
+    fun addTransaction(name: String, amount: Double, date: String, type: TransactionType, note: String = "") {
+        val currentTime = stf.format(Date())
+        transactions.add(Transaction(name = name, amount = amount, date = date, time = currentTime, type = type, note = note))
+        saveData()
+    }
+
+    fun deleteTransaction(transaction: Transaction) {
+        transactions.remove(transaction)
         saveData()
     }
 
@@ -90,17 +97,43 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun exportToCsv(contentResolver: ContentResolver, uri: Uri, filteredList: List<Transaction> = transactions) {
-        val csv = StringBuilder("Name,Amount,Date,Type\n")
+    fun exportToCsv(contentResolver: ContentResolver, uri: Uri, filteredList: List<Transaction>) {
+        val locale = Locale.getDefault()
+        val filterTotalIncome = filteredList.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
+        val filterTotalExpenses = filteredList.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
+        val net = filterTotalIncome - filterTotalExpenses
+
+        val csv = StringBuilder()
+        csv.append("\n")
+        csv.append("\n")
+        csv.append("\n")
+        csv.append("\n")
+        csv.append("SUMMARY\n")
+        csv.append("Starting Balance,${String.format(locale, "%.2f", initialBalance.value)}\n")
+        csv.append("Total Income (in range),${String.format(locale, "%.2f", filterTotalIncome)}\n")
+        csv.append("Total Expenses (in range),${String.format(locale, "%.2f", filterTotalExpenses)}\n")
+        csv.append("Net (Income - Expense),${String.format(locale, "%.2f", net)}\n")
+        csv.append("\n")
+        csv.append("TRANSACTIONS\n")
+        csv.append("Date,Type,Description,Amount (P),Note\n")
+        
         filteredList.forEach {
-            csv.append("${it.name},${it.amount},${it.date},${it.type}\n")
+            val displayAmount = if (it.type == TransactionType.EXPENSE) -it.amount else it.amount
+            csv.append("${it.date},${it.type.name},${it.name},${String.format(locale, "%.2f", displayAmount)},${it.note}\n")
         }
+        
+        csv.append("\n")
+        csv.append(",,Total Income,${String.format(locale, "%.2f", filterTotalIncome)}\n")
+        csv.append(",,Total Expenses,${String.format(locale, "%.2f", -filterTotalExpenses)}\n")
+        csv.append(",,Net,${String.format(locale, "%.2f", net)}\n")
+
         contentResolver.openOutputStream(uri)?.use {
             it.write(csv.toString().toByteArray())
         }
     }
 
-    fun exportToPdf(contentResolver: ContentResolver, uri: Uri, filteredList: List<Transaction> = transactions) {
+    fun exportToPdf(contentResolver: ContentResolver, uri: Uri, filteredList: List<Transaction>) {
+        val locale = Locale.getDefault()
         val pdfDocument = PdfDocument()
         val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4 Size
         val page = pdfDocument.startPage(pageInfo)
@@ -112,43 +145,61 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         paint.isFakeBoldText = true
         canvas.drawText("Budget Report", 200f, y, paint)
         
+        val filterTotalIncome = filteredList.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
+        val filterTotalExpenses = filteredList.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
+        val net = filterTotalIncome - filterTotalExpenses
+
         y += 40f
         paint.textSize = 14f
         paint.isFakeBoldText = false
-        canvas.drawText("Initial Balance: ₱${String.format(Locale.getDefault(), "%.2f", initialBalance.value)}", 50f, y, paint)
-        y += 25f
-        canvas.drawText("Total Income: ₱${String.format(Locale.getDefault(), "%.2f", totalIncome)}", 50f, y, paint)
-        y += 25f
-        canvas.drawText("Total Expenses: ₱${String.format(Locale.getDefault(), "%.2f", totalExpenses)}", 50f, y, paint)
-        y += 25f
+        canvas.drawText("SUMMARY", 50f, y, paint)
+        y += 20f
+        canvas.drawText("Starting Balance: P${String.format(locale, "%.2f", initialBalance.value)}", 50f, y, paint)
+        y += 20f
+        canvas.drawText("Total Income (in range): P${String.format(locale, "%.2f", filterTotalIncome)}", 50f, y, paint)
+        y += 20f
+        canvas.drawText("Total Expenses (in range): P${String.format(locale, "%.2f", filterTotalExpenses)}", 50f, y, paint)
+        y += 20f
         paint.isFakeBoldText = true
-        canvas.drawText("Current Balance: ₱${String.format(Locale.getDefault(), "%.2f", currentBalance)}", 50f, y, paint)
+        canvas.drawText("Net (Income - Expense): P${String.format(locale, "%.2f", net)}", 50f, y, paint)
         
         y += 40f
         paint.textSize = 16f
-        canvas.drawText("Transactions:", 50f, y, paint)
+        canvas.drawText("TRANSACTIONS", 50f, y, paint)
         y += 30f
         
-        paint.textSize = 12f
-        paint.isFakeBoldText = false
-        
+        paint.textSize = 10f
         paint.isFakeBoldText = true
         canvas.drawText("Date", 50f, y, paint)
-        canvas.drawText("Name", 150f, y, paint)
-        canvas.drawText("Type", 350f, y, paint)
-        canvas.drawText("Amount", 450f, y, paint)
+        canvas.drawText("Type", 120f, y, paint)
+        canvas.drawText("Description", 200f, y, paint)
+        canvas.drawText("Amount (P)", 400f, y, paint)
+        canvas.drawText("Note", 480f, y, paint)
         y += 20f
         paint.isFakeBoldText = false
         
         filteredList.forEach {
-            if (y > 800) { 
-                return@forEach 
-            }
+            if (y > 800) return@forEach 
+            val displayAmount = if (it.type == TransactionType.EXPENSE) -it.amount else it.amount
             canvas.drawText(it.date, 50f, y, paint)
-            canvas.drawText(it.name, 150f, y, paint)
-            canvas.drawText(it.type.name, 350f, y, paint)
-            canvas.drawText("₱${String.format(Locale.getDefault(), "%.2f", it.amount)}", 450f, y, paint)
+            canvas.drawText(it.type.name, 120f, y, paint)
+            canvas.drawText(it.name, 200f, y, paint)
+            canvas.drawText(String.format(locale, "%.2f", displayAmount), 400f, y, paint)
+            canvas.drawText(it.note, 480f, y, paint)
             y += 20f
+        }
+        
+        if (y < 750) {
+            y += 20f
+            paint.isFakeBoldText = true
+            canvas.drawText("Total Income", 300f, y, paint)
+            canvas.drawText(String.format(locale, "%.2f", filterTotalIncome), 400f, y, paint)
+            y += 20f
+            canvas.drawText("Total Expenses", 300f, y, paint)
+            canvas.drawText(String.format(locale, "%.2f", -filterTotalExpenses), 400f, y, paint)
+            y += 20f
+            canvas.drawText("Net", 300f, y, paint)
+            canvas.drawText(String.format(locale, "%.2f", net), 400f, y, paint)
         }
 
         pdfDocument.finishPage(page)

@@ -9,5 +9,7 @@ data class Transaction(
     val name: String,
     val amount: Double,
     val date: String,
-    val type: TransactionType
+    val time: String,
+    val type: TransactionType,
+    val note: String = ""
 )

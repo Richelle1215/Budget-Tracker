@@ -871,6 +871,7 @@ fun TransactionItem(transaction: com.example.budgettracker.data.Transaction, onD
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
+        
         Row(
             modifier = Modifier
                 .padding(16.dp)

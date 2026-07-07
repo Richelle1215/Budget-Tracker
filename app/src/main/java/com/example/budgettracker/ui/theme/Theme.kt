@@ -21,8 +21,6 @@ private val DarkColorScheme = darkColorScheme(
     error = ExpenseRed
 )
 
-
-
 private val LightColorScheme = lightColorScheme(
     primary = PrimaryBrown,
     secondary = SecondaryCream,
